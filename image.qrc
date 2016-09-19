@@ -1,0 +1,8 @@
+<RCC>
+    <qresource prefix="/">
+        <file>image/down_arrow.png</file>
+        <file>css/aip001.css</file>
+        <file>image/check_box_2.png</file>
+        <file>image/check_box_1.png</file>
+    </qresource>
+</RCC>
