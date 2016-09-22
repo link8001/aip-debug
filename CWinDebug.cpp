@@ -62,10 +62,12 @@ void CWinDebug::WinInit()
     QString qss = QLatin1String(file.readAll());
     this->setStyleSheet(qss);
 
-    ui->TabVolt->horizontalHeader()->setSectionResizeMode(0,QHeaderView::Stretch);
+    ui->TabVolt->horizontalHeader()->setSectionResizeMode(0,QHeaderView::ResizeToContents);
     ui->TabVolt->horizontalHeader()->setSectionResizeMode(1,QHeaderView::Stretch);
     ui->TabVolt->horizontalHeader()->setSectionResizeMode(2,QHeaderView::Stretch);
     ui->TabVolt->horizontalHeader()->setSectionResizeMode(3,QHeaderView::Stretch);
+    ui->TabVolt->horizontalHeader()->setSectionResizeMode(4,QHeaderView::Stretch);
+    ui->TabVolt->horizontalHeader()->setSectionResizeMode(5,QHeaderView::Stretch);
     ui->TabVolt->verticalHeader()->setSectionResizeMode(QHeaderView::Stretch);
 }
 /******************************************************************************
@@ -81,7 +83,7 @@ void CWinDebug::KeyInit()
     btnGroup->addButton(ui->KeyStart, Qt::Key_B);
     btnGroup->addButton(ui->KeyCalc,  Qt::Key_C);
     btnGroup->addButton(ui->KeyLoad,  Qt::Key_D);
-    btnGroup->addButton(ui->KeySave,  Qt::Key_E);
+    btnGroup->addButton(ui->KeyClear, Qt::Key_E);
     connect(btnGroup,SIGNAL(buttonClicked(int)),this,SLOT(KeyJudge(int)));
 }
 /******************************************************************************
@@ -100,29 +102,23 @@ void CWinDebug::KeyJudge(int id)
             ComQuit();
         break;
     case Qt::Key_B:
-        if (ui->KeyStart->text() == "开始测试") {
-            if (ui->KeyOpen->text() == "关闭串口") {
-                ui->KeyStart->setText("中断测试");
-                step = 0;
-                single = 0;
-                timer2->start(100);
-            } else {
-                SendMsg("请打开串口");
-            }
-        } else {
-            ui->KeyStart->setText("开始测试");
-            step = 0;
-            single = 0;
-            timer2->stop();
-        }
+        if (ui->KeyStart->text() == "开始测试")
+            TestInit();
+        else
+            TestQuit();
         break;
     case Qt::Key_C:
         TestCalc();
         break;
     case Qt::Key_D:
         TestLoad();
+        TestDelay(100);
+        TestSave();
         break;
     case Qt::Key_E:
+        TestClear();
+        TestLoad();
+        TestDelay(100);
         TestSave();
         break;
     default:
@@ -151,6 +147,7 @@ void CWinDebug::DatInit()
     ui->Box4->setCurrentIndex(setting->value("/Default/COM4").toInt());
     ui->Box5->setCurrentIndex(setting->value("/Default/BOX5").toInt());
     ui->Edit1->setText(setting->value("/Default/EDIT1").toString());
+    ui->Edit2->setText(setting->value("/Default/EDIT2").toString());
 
     QStringList p = (setting->value("/TEST/TESTN").toString()).split(" ");
     QStringList q = (setting->value("/TEST/TESTP").toString()).split(" ");
@@ -171,12 +168,7 @@ void CWinDebug::DatInit()
         if (i<q.size())
             ui->TabVolt->item(i,Parm)->setText(q.at(i));
     }
-    for (int i=0; i<ui->TabVolt->rowCount()/2; i++) {
-        ui->TabVolt->setSpan(i*2,KK,2,1);
-        ui->TabVolt->setSpan(i*2,BB,2,1);
-        ui->TabVolt->item(i*2,KK)->setText("1024");
-        ui->TabVolt->item(i*2,BB)->setText("1024");
-    }
+    TestClear();
 }
 /******************************************************************************
   * version:    1.0
@@ -192,6 +184,15 @@ void CWinDebug::DatSave()
     setting->setValue("/Default/COM4",ui->Box4->currentIndex());
     setting->setValue("/Default/BOX5",ui->Box5->currentIndex());
     setting->setValue("/Default/EDIT1",ui->Edit1->text());
+    setting->setValue("/Default/EDIT2",ui->Edit2->text());
+    QStringList temp;
+    for (int i=0; i<ui->TabVolt->rowCount(); i++)
+        temp.append(ui->TabVolt->item(i,Volt)->text());
+    setting->setValue("/TEST/TESTV",temp.join(" "));
+    temp.clear();
+    for (int i=0; i<ui->TabVolt->rowCount(); i++)
+        temp.append(ui->TabVolt->item(i,Parm)->text());
+    setting->setValue("/TEST/TESTP",temp.join(" "));
 }
 /******************************************************************************
   * version:    1.0
@@ -263,6 +264,7 @@ void CWinDebug::ComInit()
 ******************************************************************************/
 void CWinDebug::ComQuit()
 {
+    TestQuit();
     timer1->stop();
     if (com1 != NULL)
         com1->close();
@@ -301,8 +303,6 @@ void CWinDebug::ComRead()
     if (com4 != NULL && com4->bytesAvailable()>=14) {
         QByteArray msg = com4->readAll();
         QString v = msg.mid(1,5);
-
-
         if (msg.at(6) == '=') {
             ui->LabGear2->setText("uA");
             v.insert(msg.at(0)-0x30,".");
@@ -325,7 +325,6 @@ void CWinDebug::ComRead()
         if (msg.at(10) == ':') {
             ui->LabUnit2->setText("DC");
         }
-
     }
 }
 /******************************************************************************
@@ -360,205 +359,86 @@ void CWinDebug::closeEvent(QCloseEvent *e)
 ******************************************************************************/
 void CWinDebug::Test()
 {
-    if (ui->Box5->currentText() == "单步测试") {
-        int ret = ui->TabVolt->currentRow();
-        if (ret < 0)
-            step = 0;
-        else
-            step = ret;
-    }
-    QString temp = ui->TabVolt->item(step,Name)->text();
-    if (temp.contains("电压")) {
-        switch (single) {
-        case CHECK:
-            if (TestWait())
-                single = TOOL0;
-            break;
-        case TOOL0:
-            TestTool(0);
-            single = STOP0;
-            break;
-        case STOP0:
-            TestStop();
-            single = CONFT;
-            break;
-        case CONFT:
-            TestConfig();
-            single = START;
-            break;
-        case START:
-            TestBegin();
-            single = RESULT0;
-            timer2->start(4500);
-            break;
-        case RESULT0:
+    switch (single) {
+    case CHECK:
+        if (TestWait())
+            single = TOOL0;
+        break;
+    case TOOL0:
+        TestTool();
+        single = STOP0;
+        break;
+    case STOP0:
+        TestStop();
+        single = CONFG;
+        break;
+    case CONFG:
+        TestConfig();
+        single = START;
+        break;
+    case START:
+        TestStart();
+        single = TOOL1;
+        timer2->start(1500);
+        break;
+    case TOOL1:
+        TestTool();
+        single = RSLT0;
+        timer2->start(3000);
+        break;
+    case RSLT0:
+        if (item.contains("电压")) {
             ui->TabVolt->item(step,Real)->setText(QString::number(ui->NumVolt->value()*ui->Edit1->text().toDouble()));
             single = STOP1;
             timer2->start(100);
-            break;
-        case STOP1:
-            TestStop();
-            single = LOAD;
-            break;
-        case LOAD:
-            TestCalc();
-            TestLoad();
-            single = SAVE;
-            break;
-        case SAVE:
-            TestSave();
-            single = END;
-            break;
-        case END:
-            single = 0;
-            if (ui->Box5->currentText() == "连续测试") {
-                step++;
-                if (step == ui->TabVolt->rowCount()) {
-                    timer2->stop();
-                    ui->KeyStart->setText("开始测试");
-                }
-            } else {
-                timer2->stop();
-                ui->KeyStart->setText("开始测试");
-            }
-            break;
-        default:
-            break;
-        }
-    } else if (temp.contains("耐压电流")) {
-        switch (single) {
-        case CHECK:
-            if (TestWait())
-                single = TOOL0;
-            break;
-        case TOOL0:
-            TestTool(0);
-            single = STOP0;
-            break;
-        case STOP0:
-            TestStop();
-            single = CONFT;
-            break;
-        case CONFT:
-            TestConfig();
-            single = START;
-            break;
-        case START:
-            TestBegin();
-            single = TOOL1;
-            timer2->start(1500);
-            break;
-        case TOOL1:
-            TestTool(1);
-            single = RESULT0;
-            timer2->start(3000);
-            break;
-        case RESULT0:
+        } else if (item.contains("耐压电流")) {
             ui->TabVolt->item(step,Real)->setText(QString::number(ui->NumElec->value()));
-            single = RESULT1;
+            single = RSLT1;
             timer2->start(2000);
-            break;
-        case RESULT1:
-            TestGetResult();
-            single = RESULT2;
-            timer2->start(100);
-            break;
-        case RESULT2:
-            result = com1->readAll();
-            r = quint8(result.at(13))+quint8(result.at(14))*256+quint8(result.at(15))*256*256;
+        } else if (item.contains("绝缘电阻")) {
+            single = RSLT1;
+            timer2->start(2000);
+        }
+        break;
+    case RSLT1:
+        TestResult();
+        single = RSLT2;
+        timer2->start(100);
+        break;
+    case RSLT2:
+        result = com1->readAll();
+        r = quint8(result.at(13))+quint8(result.at(14))*256+quint8(result.at(15))*256*256;
+        if (item.contains("耐压电流"))
             ui->TabVolt->item(step,Parm)->setText(QString::number(r/1000));
-            single = LOAD;
-            break;
-        case LOAD:
-            TestCalc();
-            TestLoad();
-            single = SAVE;
-            break;
-        case SAVE:
-            TestSave();
-            single = END;
-            break;
-        case END:
-            single = 0;
-            if (ui->Box5->currentText() == "连续测试") {
-                step++;
-                if (step == ui->TabVolt->rowCount()) {
-                    timer2->stop();
-                    ui->KeyStart->setText("开始测试");
-                }
-            } else {
-                timer2->stop();
-                ui->KeyStart->setText("开始测试");
-            }
-            break;
-        default:
-            break;
-        }
-    } else if (temp.contains("绝缘电阻")) {
-        switch (single) {
-        case CHECK:
-            if (TestWait())
-                single = TOOL0;
-            break;
-        case TOOL0:
-            TestTool(0);
-            single = STOP0;
-            break;
-        case STOP0:
-            TestStop();
-            single = CONFT;
-            break;
-        case CONFT:
-            TestConfig();
-            single = START;
-            break;
-        case START:
-            TestBegin();
-            single = TOOL1;
-            timer2->start(1500);
-            break;
-        case TOOL1:
-            TestTool(1);
-            single = RESULT1;
-            timer2->start(5500);
-            break;
-        case RESULT1:
-            TestGetResult();
-            single = RESULT2;
-            timer2->start(100);
-            break;
-        case RESULT2:
-            result = com1->readAll();
-            qDebug()<<"result"<<result;
-            r = quint8(result.at(13))+quint8(result.at(14))*256+quint8(result.at(15))*256*256;
+        if (item.contains("绝缘电阻"))
             ui->TabVolt->item(step,Real)->setText(QString::number(r/100));
-            single = LOAD;
-            break;
-        case LOAD:
-            TestCalc();
-            TestLoad();
-            single = SAVE;
-            break;
-        case SAVE:
-            TestSave();
-            single = END;
-            break;
-        case END:
-            single = 0;
-            if (ui->Box5->currentText() == "连续测试") {
-                step++;
-                if (step == ui->TabVolt->rowCount()) {
-                    timer2->stop();
-                    ui->KeyStart->setText("开始测试");
-                }
-            } else {
-                timer2->stop();
-                ui->KeyStart->setText("开始测试");
-            }
-            break;
-        default:
+        single = LOAD;
+        break;
+    case STOP1:
+        TestStop();
+        single = LOAD;
+        break;
+    case LOAD:
+        if (ui->Box5->currentText() == "单步测试") {
+            TestQuit();
             break;
         }
+        TestCalc();
+        TestLoad();
+        single = SAVE;
+        break;
+    case SAVE:
+        TestSave();
+        single = OVER;
+        break;
+    case OVER:
+        single = 0;
+        step++;
+        if (step == ui->TabVolt->rowCount())
+            TestQuit();
+        break;
+    default:
+        break;
     }
 }
 /******************************************************************************
@@ -569,26 +449,26 @@ void CWinDebug::Test()
 ******************************************************************************/
 bool CWinDebug::TestWait()
 {
+    qDebug()<<"TestWait";
     ui->textBrowser->clear();
-    QString temp = ui->TabVolt->item(step,Name)->text();
-    if (temp.contains("耐压电压") && ui->LabUnit1->text() != "AC") {
-        SendMsg("请将电压表打到AC档\n");
+    if (ui->Box5->currentText() == "单步测试")
+        step = ui->TabVolt->currentRow();
+
+    item = ui->TabVolt->item(step,Name)->text();
+    if (item.contains("耐压电压") && ui->LabUnit1->text() != "AC") {
+        SendMsg("请将电压表打到AC档...\n");
         return false;
-    }
-    if ((temp.contains("绝缘电压") || temp.contains("匝间电压")) && ui->LabUnit1->text() != "DC") {
-        SendMsg("请将电压表打到DC档\n");
+    } else if ((item.contains("绝缘电压") || item.contains("匝间电压")) && ui->LabUnit1->text() != "DC") {
+        SendMsg("请将电压表打到DC档...\n");
         return false;
-    }
-    if (temp.contains("耐压电流") && ui->LabUnit2->text() != "AC") {
-        SendMsg("请将电流表打到AC档\n");
+    } else if (item.contains("耐压电流") && ui->LabUnit2->text() != "AC") {
+        SendMsg("请将电流表打到AC档...\n");
         return false;
-    }
-    if ((temp.contains("耐压电流1") || temp.contains("耐压电流2") ||temp.contains("耐压电流3")) && ui->LabGear2->text() != "uA") {
-        SendMsg("请将电流表打到uA档\n");
+    } else if ((item.contains("耐压电流1") || item.contains("耐压电流2") ||item.contains("耐压电流3")) && ui->LabGear2->text() != "uA") {
+        SendMsg("请将电流表打到uA档...\n");
         return false;
-    }
-    if ((temp.contains("耐压电流4") || temp.contains("耐压电流5") ||temp.contains("耐压电流6")) && ui->LabGear2->text() != "mA") {
-        SendMsg("请将电流表打到mA档\n");
+    } else if ((item.contains("耐压电流4") || item.contains("耐压电流5") ||item.contains("耐压电流6")) && ui->LabGear2->text() != "mA") {
+        SendMsg("请将电流表打到mA档...\n");
         return false;
     }
     return true;
@@ -599,65 +479,58 @@ bool CWinDebug::TestWait()
   * date:       2016.08.23
   * brief:      工装切换
 ******************************************************************************/
-void CWinDebug::TestTool(quint8 t)
+void CWinDebug::TestTool()
 {
-    quint8 crc;
-    QByteArray cmd;
-    QDataStream out(&cmd,QIODevice::ReadWrite);
-
-    cmd = QByteArray::fromHex("7B000010000000000000007D");
-    out.device()->seek(1);
-    out<<quint8(cmd.size());
-    out.device()->seek(4);
-
-    QString temp = ui->TabVolt->item(step,Name)->text();
-    if (temp.contains("耐压电压") || temp.contains("绝缘电压"))
-        out<<quint8(0x00)<<quint8(0x02)<<quint8(0x00)<<quint8(0x00);
-    else if (temp.contains("匝间电压"))
-        out<<quint8(0x00)<<quint8(0x06)<<quint8(0x00)<<quint8(0x00);
-    else if (temp.contains("耐压电流1"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x02);
-    else if (temp.contains("耐压电流2"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x02)<<quint8(0x00);
-    else if (temp.contains("耐压电流3") && t==0)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x02)<<quint8(0x20);
-    else if (temp.contains("耐压电流3") && t==1)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x02)<<quint8(0x00);
-    else if (temp.contains("耐压电流4"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x01);
-    else if (temp.contains("耐压电流5") && t==0)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x20)<<quint8(0x01);
-    else if (temp.contains("耐压电流5") && t==1)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x01);
-    else if (temp.contains("耐压电流6"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x20)<<quint8(0x01);
-    else if (temp.contains("绝缘电阻1"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x10);
-    else if (temp.contains("绝缘电阻2"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x01)<<quint8(0x00);
-    else if (temp.contains("绝缘电阻3") && t==0)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x11)<<quint8(0x00);
-    else if (temp.contains("绝缘电阻3") && t==1)
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x01)<<quint8(0x00);
-    else if (temp.contains("绝缘电阻4"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x08);
-    else if (temp.contains("绝缘电阻5"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x88);
-    else if (temp.contains("绝缘电阻6"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x80);
-    else if (temp.contains("绝缘电阻7"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x08)<<quint8(0x00);
-    else if (temp.contains("绝缘电阻8"))
-        out<<quint8(0x00)<<quint8(0x00)<<quint8(0x80)<<quint8(0x00);
+    if (item.contains("耐压电压") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000200000000027D"));
+    else if (item.contains("绝缘电压") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000200000000027D"));
+    else if (item.contains("匝间电压") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000600000000067D"));
+    else if (item.contains("耐压电流1") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000020000027D"));
+    else if (item.contains("耐压电流2") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000002000000027D"));
+    else if (item.contains("耐压电流3") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000002200000227D"));
+    else if (item.contains("耐压电流3") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000002000000027D"));
+    else if (item.contains("耐压电流4") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000010000017D"));
+    else if (item.contains("耐压电流5") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000020010000217D"));
+    else if (item.contains("耐压电流5") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000000010000017D"));
+    else if (item.contains("耐压电流6") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000020010000217D"));
+    else if (item.contains("绝缘电阻1") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000100000107D"));
+    else if (item.contains("绝缘电阻2") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000100000107D"));
+    else if (item.contains("绝缘电阻2") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000001000000017D"));
+    else if (item.contains("绝缘电阻3") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000001000000017D"));
+    else if (item.contains("绝缘电阻4") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000001000000017D"));
+    else if (item.contains("绝缘电阻4") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000000080000087D"));
+    else if (item.contains("绝缘电阻5") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000080000087D"));
+    else if (item.contains("绝缘电阻6") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000000080000087D"));
+    else if (item.contains("绝缘电阻6") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000000800000807D"));
+    else if (item.contains("绝缘电阻7") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000080000000807D"));
+    else if (item.contains("绝缘电阻7") && single==TOOL1)
+        com2->write(QByteArray::fromHex("7B0C0010000008000000087D"));
+    else if (item.contains("绝缘电阻8") && single==TOOL0)
+        com2->write(QByteArray::fromHex("7B0C0010000080000000807D"));
     else
         return ;
-    out.device()->seek(cmd.size()-2);
-    crc = 0;
-    for (int i=4; i<cmd.size()-2; i++)
-        crc += cmd.at(i);
-    out<<quint8(crc);
-    com2->write(cmd);
-    qDebug()<<"ToolSwitch:"<<cmd.toHex().toUpper();
+    SendMsg("工装切换中...\n");
+    qDebug()<<"TestTool";
 }
 /******************************************************************************
   * version:    1.0
@@ -665,16 +538,16 @@ void CWinDebug::TestTool(quint8 t)
   * date:       2016.08.23
   * brief:      开始测试
 ******************************************************************************/
-void CWinDebug::TestBegin()
+void CWinDebug::TestStart()
 {
-    QString temp = ui->TabVolt->item(step,Name)->text();
-    if (temp.contains("耐压"))
+    if (item.contains("耐压"))
         com1->write(QByteArray::fromHex("7B070001030B7D"));
-    else if (temp.contains("绝缘"))
+    else if (item.contains("绝缘"))
         com1->write(QByteArray::fromHex("7B070001070F7D"));
-    else if (temp.contains("匝间"))
+    else if (item.contains("匝间"))
         com1->write(QByteArray::fromHex("7B08001318083B7D"));
-    qDebug()<<"TestBegin";
+    SendMsg("测试启动，等待...\n");
+    qDebug()<<"TestStart";
 }
 /******************************************************************************
   * version:    1.0
@@ -689,6 +562,7 @@ void CWinDebug::TestStop()
         com1->write(QByteArray::fromHex("7B08001338085B7D"));
     else
         com1->write(QByteArray::fromHex("7B060002087D"));
+    SendMsg("测试停止...\n");
     qDebug()<<"TestStop";
 }
 /******************************************************************************
@@ -702,49 +576,38 @@ void CWinDebug::TestConfig()
     quint8 crc;
     QByteArray cmd;
     QDataStream out(&cmd,QIODevice::ReadWrite);
-    cmd = QByteArray::fromHex("7B000010000000000000000000000000000000000000000000007D");
-    out.device()->seek(1);
-    out<<quint8(cmd.size());
-    out.device()->seek(6);
-
-    QString temp = ui->TabVolt->item(step,Name)->text();
     quint16 v = ui->TabVolt->item(step,1)->text().toInt();
-    if (temp.contains("耐压")) {
-        out<<quint8(0x03)<<quint8(0xD0)<<quint8(0x00)
-          <<quint8(v%256)<<quint8(v/256)//0x10,0x50,0x90,0xD0//电压
-         <<quint8(2500%256)<<quint8(2500/256)<<quint8(0x00)<<quint8(0x00)<<quint8(50)<<quint8(0);//电流上限//电流下限//时间
-    } else if (temp.contains("绝缘")) {
-        out<<quint8(0x07)<<quint8(0xD2)<<quint8(0x00) //0x12,0x52,0x92,0xD2
-          <<quint8(v%256)<<quint8(v/256)//0x10,0x50,0x90,0xD0//电压
-         <<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(0x00)<<quint8(50)<<quint8(0);//保留//电流下限//时间
-    } else if (temp.contains("匝间")) {
-        out<<quint8(0x08)<<quint8(0x15)<<quint8(0x00) //0x15,0x55,0x95,0xD5
-          <<quint8(v%256)<<quint8(v/256)//电压
-         <<quint8(0x02)<<quint8(0x00)//次数
-        <<quint8(0x0A)<<quint8(0x00)//电晕
-        <<quint8(0x0A)<<quint8(0x00)//电晕
-        <<quint8(0x0A)<<quint8(0x00)//面积
-        <<quint8(0x0A)<<quint8(0x00);//差积
-    } else {
-        return;
-    }
+    if (item.contains("耐压"))
+        cmd = QByteArray::fromHex("7B1B0010000003D000F401C409000032000000000000000000F27D");
+    else if (item.contains("绝缘"))
+        cmd = QByteArray::fromHex("7B1B0010000007D200F40100000000320000000000000000002B7D");
+    else if (item.contains("匝间"))
+        cmd = QByteArray::fromHex("7B1B00100000081500F40102000A000A000A000A0000000000677D");
+    out.device()->seek(9);
+    out<<quint8(v%256)<<quint8(v/256);
     out.device()->seek(cmd.size()-2);
     crc = 0;
     for (int i=1; i<cmd.size()-2; i++)
         crc += cmd.at(i);
     out<<quint8(crc);
     com1->write(cmd);
-    qDebug()<<"TestConfig:"<<cmd.toHex();
+    SendMsg("配置参数...\n");
+    qDebug()<<"TestConfig:"<<cmd.toHex().toUpper();
 }
-
-void CWinDebug::TestGetResult()
+/******************************************************************************
+  * version:    1.0
+  * author:     link
+  * date:       2016.08.23
+  * brief:      获取测试结果
+******************************************************************************/
+void CWinDebug::TestResult()
 {
-    QString temp = ui->TabVolt->item(step,Name)->text();
     com1->readAll();
-    if (temp.contains("耐压"))
+    if (item.contains("耐压"))
         com1->write(QByteArray::fromHex("7B070004030E7D"));
-    if (temp.contains("绝缘"))
+    if (item.contains("绝缘"))
         com1->write(QByteArray::fromHex("7B07000407127D"));
+    SendMsg("获取测试结果...\n");
     qDebug()<<"TestGetResult";
 }
 /******************************************************************************
@@ -768,11 +631,53 @@ void CWinDebug::TestCalc()
         double r0 = ui->TabVolt->item(i*2+0,Real)->text().toDouble();
         double s1 = ui->TabVolt->item(i*2+1,Parm)->text().toDouble();
         double r1 = ui->TabVolt->item(i*2+1,Real)->text().toDouble();
-        int k = ((r1-r0)*1024/(s1-s0));
-        int b = ((r1-r0)*s0/(s1-s0)+1024-r0);
+        QString temp = ui->TabVolt->item(i*2,Name)->text();
+        int k = 0;
+        int b = 0;
+        if (temp.contains("耐压电压") || temp.contains("绝缘电压")) {
+            k = ((r1-r0)*1024/(s1-s0));
+            b = ((r1-r0)*s0/(s1-s0)+1024-r0);
+        } else if (temp.contains("匝间电压")) {
+            r0 *= ui->Edit2->text().toDouble();
+            r1 *= ui->Edit2->text().toDouble();
+            k = ((s1-s0)*1024/(r1-r0));
+            b = ((s1-s0)*r0/(r1-r0)+1024-s0);
+        }else if (temp.contains("耐压电流")) {
+            r0 *= 100;
+            r1 *= 100;
+            s0 *= 100;
+            s1 *= 100;
+            k = ((r1-r0)*1024/(s1-s0));
+            b = ((r1-r0)*s0/(s1-s0)+1024-r0);
+        } else if (temp.contains("绝缘电阻1") || temp.contains("绝缘电阻3") || temp.contains("绝缘电阻5")) {
+            r0 *= 100;
+            r1 *= 100;
+            s0 *= 100;
+            s1 *= 100;
+            k = ((r1-r0)*s0*s1/(s1-s0))*1024/(r0*r1);
+            b = k*1000000/s0/1024+1024-1000000/r0;
+        }else if (temp.contains("绝缘电阻7")) {
+            r0 *= 100;
+            r1 *= 100;
+            s0 *= 100;
+            s1 *= 100;
+            k = ((r1-r0)*s0*s1/(s1-s0))*1024/(r0*r1);
+            b = k*500000/s0/1024+1024-500000/r0;
+        }
+        if (abs(s0-r0)/s0 > 0.1)
+            ui->TabVolt->item(i*2+0,Real)->setTextColor(QColor(Qt::red));
+        else
+            ui->TabVolt->item(i*2+0,Real)->setTextColor(QColor(Qt::white));
+        if (abs(s1-r1)/s1 > 0.1)
+            ui->TabVolt->item(i*2+1,Real)->setTextColor(QColor(Qt::red));
+        else
+            ui->TabVolt->item(i*2+1,Real)->setTextColor(QColor(Qt::white));
+
         ui->TabVolt->item(i*2,KK)->setText(QString::number(k));
         ui->TabVolt->item(i*2,BB)->setText(QString::number(b));
     }
+    SendMsg("计算调试参数...\n");
+    qDebug()<<"TestCalc";
 }
 /******************************************************************************
   * version:    1.0
@@ -782,8 +687,10 @@ void CWinDebug::TestCalc()
 ******************************************************************************/
 void CWinDebug::TestLoad()
 {
-    if (ui->KeyOpen->text() == "打开串口")
+    if (ui->KeyOpen->text() == "打开串口") {
+        SendMsg("请打开串口\n");
         return;
+    }
     quint8 crc;
     QByteArray cmd;
     QDataStream out(&cmd,QIODevice::ReadWrite);
@@ -792,10 +699,9 @@ void CWinDebug::TestLoad()
     out.device()->seek(1);
     out<<quint8(cmd.size());
     for (int i=0; i<ui->TabVolt->rowCount()/2; i++) {
-        QString temp = ui->TabVolt->item(i,Name)->text();
+        QString temp = ui->TabVolt->item(i*2,Name)->text();
         int k = ui->TabVolt->item(i*2,KK)->text().toInt();
         int b = ui->TabVolt->item(i*2,BB)->text().toInt();
-        qDebug()<<k<<b;
         if (temp.contains("耐压电压1")) {
             out.device()->seek(4);
             out<<quint8(k%256)<<quint8(k/256);
@@ -859,6 +765,7 @@ void CWinDebug::TestLoad()
         crc += cmd.at(i);
     out<<quint8(crc);
     com1->write(cmd);
+    SendMsg("下发调试参数...\n");
     qDebug()<<"TestLoad:"<<cmd.toHex().toUpper();
 }
 /******************************************************************************
@@ -869,9 +776,66 @@ void CWinDebug::TestLoad()
 ******************************************************************************/
 void CWinDebug::TestSave()
 {
+
     if (ui->KeyOpen->text() == "打开串口")
         return;
     com1->write(QByteArray::fromHex("7B0700A300AA7D"));
+    SendMsg("保存调试参数...\n");
     qDebug()<<"TestSave";
+}
+/******************************************************************************
+  * version:    1.0
+  * author:     link
+  * date:       2016.08.23
+  * brief:      测试开始
+******************************************************************************/
+void CWinDebug::TestInit()
+{
+    if (ui->KeyOpen->text() != "关闭串口") {
+        SendMsg("请打开串口");
+        return;
+    }
+    step = 0;
+    single = 0;
+    timer2->start(100);
+    SendMsg("测试开始\n");
+    ui->KeyStart->setText("中断测试");
+}
+/******************************************************************************
+  * version:    1.0
+  * author:     link
+  * date:       2016.08.23
+  * brief:      测试退出
+******************************************************************************/
+void CWinDebug::TestQuit()
+{
+    step = 0;
+    single = 0;
+    timer2->stop();
+    SendMsg("测试结束\n");
+    ui->KeyStart->setText("开始测试");
+}
+
+void CWinDebug::TestClear()
+{
+    for (int i=0; i<ui->TabVolt->rowCount()/2; i++) {
+        ui->TabVolt->setSpan(i*2,KK,2,1);
+        ui->TabVolt->setSpan(i*2,BB,2,1);
+        ui->TabVolt->item(i*2,KK)->setText("1024");
+        ui->TabVolt->item(i*2,BB)->setText("1024");
+    }
+}
+/******************************************************************************
+  * version:    1.0
+  * author:     link
+  * date:       2016.08.23
+  * brief:      延时
+******************************************************************************/
+void CWinDebug::TestDelay(int ms)
+{
+    QTime t;
+    t.start();
+    while(t.elapsed()<ms)
+        QCoreApplication::processEvents();
 }
 

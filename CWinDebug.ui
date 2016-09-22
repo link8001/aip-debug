@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>青岛艾普智能仪器自动调试工具V0.3by 赵楠林</string>
+   <string>青岛艾普智能仪器自动调试工具V0.5</string>
   </property>
   <layout class="QHBoxLayout" name="horizontalLayout" stretch="2,1">
    <item>
@@ -161,14 +161,14 @@
             <item row="0" column="0">
              <widget class="QLabel" name="label_70">
               <property name="text">
-               <string>电压</string>
+               <string>电压/V</string>
               </property>
              </widget>
             </item>
             <item row="1" column="0">
              <widget class="QLabel" name="label_71">
               <property name="text">
-               <string>电流</string>
+               <string>电流/mA</string>
               </property>
              </widget>
             </item>
@@ -371,6 +371,20 @@
               </property>
              </widget>
             </item>
+            <item row="7" column="0">
+             <widget class="QLabel" name="label_8">
+              <property name="text">
+               <string>匝间倍数</string>
+              </property>
+             </widget>
+            </item>
+            <item row="7" column="1">
+             <widget class="QLineEdit" name="Edit2">
+              <property name="text">
+               <string>0.92</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </widget>
          </item>
@@ -454,6 +468,19 @@
                 </widget>
                </item>
                <item>
+                <widget class="QPushButton" name="KeyClear">
+                 <property name="sizePolicy">
+                  <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
+                   <horstretch>0</horstretch>
+                   <verstretch>0</verstretch>
+                  </sizepolicy>
+                 </property>
+                 <property name="text">
+                  <string>参数清零</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
                 <widget class="QPushButton" name="KeyStart">
                  <property name="sizePolicy">
                   <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
@@ -489,19 +516,6 @@
                  </property>
                  <property name="text">
                   <string>下发参数</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QPushButton" name="KeySave">
-                 <property name="sizePolicy">
-                  <sizepolicy hsizetype="Minimum" vsizetype="Expanding">
-                   <horstretch>0</horstretch>
-                   <verstretch>0</verstretch>
-                  </sizepolicy>
-                 </property>
-                 <property name="text">
-                  <string>保存参数</string>
                  </property>
                 </widget>
                </item>
